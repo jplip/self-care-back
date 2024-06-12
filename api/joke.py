@@ -1,97 +1,91 @@
-from flask import Blueprint, jsonify  # jsonify creates an endpoint response object
-from flask_restful import Api, Resource # used for REST API building
-import requests  # used for testing 
-import random
+import seaborn as sns
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
 
-from model.jokes import *
+class ExercisePredictor:
+    def __init__(self):
+        self.data = None
+        self.model = None
+        self.X_train = None
+        self.X_test = None
+        self.y_train = None
+        self.y_test = None
+        
+    def load_data(self):
+        self.data = sns.load_dataset('exercise')
+        
+    def preprocess_data(self):
+        if self.data is None:
+            raise ValueError("Data not loaded. Call load_data() first.")
+        
+        # Define a good heart rate range
+        self.data['good_hr'] = (self.data['pulse'] >= 100) & (self.data['pulse'] <= 150)
+        
+        # Convert categorical variables into dummy variables
+        self.data = pd.get_dummies(self.data, columns=['diet', 'kind'])
+        
+    def train_model(self):
+        if self.data is None:
+            raise ValueError("Data not loaded. Call load_data() and preprocess_data() first.")
+        
+        X = self.data.drop(['id', 'time', 'good_hr'], axis=1)
+        y = self.data['good_hr']
+        
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        
+        # Train Random Forest classifier
+        self.model = RandomForestClassifier(n_estimators=100, random_state=42)
+        self.model.fit(self.X_train, self.y_train)
+        
+    def evaluate_model(self):
+        if self.model is None:
+            raise ValueError("Model not trained. Call train_model() first.")
+        
+        y_pred = self.model.predict(self.X_test)
+        accuracy = accuracy_score(self.y_test, y_pred)
+        print(f"Model Accuracy: {accuracy:.2f}")
+        
+    def predict_heart_rate(self, data):
+        if self.model is None:
+            raise ValueError("Model not trained. Call train_model() first.")
+        
+        # Preprocess input data
+        data = pd.get_dummies(data, columns=['diet', 'kind'])
+        
+        # Make predictions
+        predictions = self.model.predict(data)
+        return predictions
 
-joke_api = Blueprint('joke_api', __name__,
-                   url_prefix='/api/jokes')
-
-# API generator https://flask-restful.readthedocs.io/en/latest/api.html#id1
-api = Api(joke_api)
-
-class JokesAPI:
-    # not implemented
-    class _Create(Resource):
-        def post(self, joke):
-            pass
-            
-    # getJokes()
-    class _Read(Resource):
-        def get(self):
-            return jsonify(getJokes())
-
-    # getJoke(id)
-    class _ReadID(Resource):
-        def get(self, id):
-            return jsonify(getJoke(id))
-
-    # getRandomJoke()
-    class _ReadRandom(Resource):
-        def get(self):
-            return jsonify(getRandomJoke())
+# Example usage
+def main():
+    # Create ExercisePredictor object
+    predictor = ExercisePredictor()
     
-    # getRandomJoke()
-    class _ReadCount(Resource):
-        def get(self):
-            count = countJokes()
-            countMsg = {'count': count}
-            return jsonify(countMsg)
-
-    # put method: addJokeHaHa
-    class _UpdateLike(Resource):
-        def put(self, id):
-            addJokeHaHa(id)
-            return jsonify(getJoke(id))
-
-    # put method: addJokeBooHoo
-    class _UpdateJeer(Resource):
-        def put(self, id):
-            addJokeBooHoo(id)
-            return jsonify(getJoke(id))
-
-    # building RESTapi resources/interfaces, these routes are added to Web Server
-    api.add_resource(_Create, '/create/<string:joke>')
-    api.add_resource(_Read, '/')
-    api.add_resource(_ReadID, '/<int:id>')
-    api.add_resource(_ReadRandom, '/random')
-    api.add_resource(_ReadCount, '/count')
-    api.add_resource(_UpdateLike, '/like/<int:id>')
-    api.add_resource(_UpdateJeer, '/jeer/<int:id>')
+    # Load and preprocess data
+    predictor.load_data()
+    predictor.preprocess_data()
     
-if __name__ == "__main__": 
-    # server = "http://127.0.0.1:5000" # run local
-    server = 'https://flask.nighthawkcodingsociety.com' # run from web
-    url = server + "/api/jokes"
-    responses = []  # responses list
+    # Train the model
+    predictor.train_model()
+    
+    # Evaluate the model
+    predictor.evaluate_model()
+    
+    # Define new data for prediction
+    new_data = pd.DataFrame({
+        'diet_no fat': [0],  # Example diet type (0 for 'low fat', 1 for 'no fat')
+        'pulse': [140],  # Example heart rate
+        'diet_time': [1],  # Example time of day (1 for morning, 2 for afternoon, 3 for evening)
+        'diet_low fat': [1],  # Example diet type (0 for 'low fat', 1 for 'no fat')
+        'kind_rest': [0],  # Example exercise type (0 for 'rest', 1 for 'walking', 0 for 'running')
+        'kind_running': [0]
+    })
+    
+    # Make predictions
+    predictions = predictor.predict_heart_rate(new_data)
+    print("Predicted heart rate status:", "good" if predictions[0] == 1 else "not good")
 
-    # get count of jokes on server
-    count_response = requests.get(url+"/count")
-    count_json = count_response.json()
-    count = count_json['count']
-
-    # update likes/dislikes test sequence
-    num = str(random.randint(0, count-1)) # test a random record
-    responses.append(
-        requests.get(url+"/"+num)  # read joke by id
-        ) 
-    responses.append(
-        requests.put(url+"/like/"+num) # add to like count
-        ) 
-    responses.append(
-        requests.put(url+"/jeer/"+num) # add to jeer count
-        ) 
-
-    # obtain a random joke
-    responses.append(
-        requests.get(url+"/random")  # read a random joke
-        ) 
-
-    # cycle through responses
-    for response in responses:
-        print(response)
-        try:
-            print(response.json())
-        except:
-            print("unknown error")
+if __name__ == "__main__":
+    main()
